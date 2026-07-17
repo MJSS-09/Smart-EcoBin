@@ -1,0 +1,10 @@
+ Smart EcoBin
+
+  Logic:
+  - Bottom ultrasonic (TRIG1/ECHO1) -> controls MAIN LID only
+  - Top-left ultrasonic (TRIG2/ECHO2) -> DRY compartment FULL LEVEL sensor
+  - Top-right ultrasonic (TRIG3/ECHO3) -> WET compartment FULL LEVEL sensor
+  - Dry full only  -> 1 beep
+  - Wet full only  -> 2 beeps
+  - Both full      -> 3 beeps
+  - Moisture sensor + flap servo -> still used to segregate waste as it falls in
