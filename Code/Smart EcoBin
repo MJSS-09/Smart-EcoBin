@@ -1,0 +1,200 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Servo.h>
+
+// ---------- OLED ----------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET   -1
+#define OLED_ADDR    0x3C
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ---------- Ultrasonic pins ----------
+#define TRIG1 2   // Main lid (bottom sensor)
+#define ECHO1 3
+#define TRIG2 4   // Dry compartment level (top-left)
+#define ECHO2 5
+#define TRIG3 6   // Wet compartment level (top-right)
+#define ECHO3 7
+
+// ---------- Servos ----------
+#define SERVO1_PIN 10  // Lid
+#define SERVO2_PIN 9   // Wet/Dry flap
+Servo lidServo;
+Servo flapServo;
+
+// ---------- Moisture sensor ----------
+#define MOISTURE_PIN A0
+#define WET_THRESHOLD 500
+
+// ---------- Buzzer ----------
+#define BUZZER_PIN 8
+
+// ---------- Distances (cm) ----------
+#define FRONT_TRIGGER_CM 20   // bottom sensor -> lid open trigger
+#define FULL_LEVEL_CM 5       // top sensors -> compartment FULL threshold
+
+// ---------- State flags (avoid repeated beeping every loop) ----------
+bool dryFullAlerted = false;
+bool wetFullAlerted = false;
+bool bothFullAlerted = false;
+
+void setup() {
+  Serial.begin(9600);
+  delay(500); // let power rails stabilize
+
+  pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
+  pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
+  pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  lidServo.attach(SERVO1_PIN);
+  flapServo.attach(SERVO2_PIN);
+  lidServo.write(0);
+  flapServo.write(90); // neutral/center
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println(F("OLED init failed"));
+    while (true) {}
+  }
+
+  showMessage("SMART DUSTBIN", "SYSTEM STARTING...");
+  delay(2000);
+  showMessage("READY FOR WASTE", "");
+}
+
+void loop() {
+  // ---- Main lid control (bottom sensor only) ----
+  long frontDist = getDistanceCM(TRIG1, ECHO1);
+  if (frontDist > 0 && frontDist <= FRONT_TRIGGER_CM) {
+    openLid();
+    delay(5000);
+    closeLid();
+    segregateWaste();
+  } else {
+    showMessage("READY FOR WASTE", "");
+  }
+
+  // ---- Compartment full-level monitoring (top sensors) ----
+  checkCompartmentLevels();
+
+  delay(300);
+}
+
+// ---------------- Ultrasonic helper ----------------
+long getDistanceCM(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  if (duration == 0) return -1;
+  long distance = duration * 0.0343 / 2;
+  return distance;
+}
+
+// ---------------- OLED helper ----------------
+void showMessage(const char* line1, const char* line2) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 20);
+  display.println(line1);
+  if (line2 != NULL && strlen(line2) > 0) {
+    display.setCursor(0, 35);
+    display.println(line2);
+  }
+  display.display();
+}
+
+// ---------------- Lid control ----------------
+void openLid() {
+  showMessage("BIN OPENING...", "");
+  lidServo.write(90);
+  delay(500);
+  showMessage("BIN OPEN", "");
+}
+
+void closeLid() {
+  showMessage("BIN CLOSING...", "");
+  lidServo.write(0);
+  delay(500);
+  showMessage("BIN CLOSED", "");
+}
+
+// ---------------- Waste segregation (moisture-based flap) ----------------
+void segregateWaste() {
+  int moistureValue = analogRead(MOISTURE_PIN);
+
+  if (moistureValue < WET_THRESHOLD) {
+    showMessage("WET WASTE DETECTED", "");
+    flapServo.write(180); // +90 from neutral(90)
+    delay(1000);
+    flapServo.write(90);  // back to neutral
+  } else {
+    showMessage("DRY WASTE DETECTED", "");
+    flapServo.write(0);   // -90 from neutral(90)
+    delay(1000);
+    flapServo.write(90);  // back to neutral
+  }
+  delay(500);
+}
+
+// ---------------- Compartment full-level monitoring ----------------
+void checkCompartmentLevels() {
+  long dryDist = getDistanceCM(TRIG2, ECHO2);
+  long wetDist = getDistanceCM(TRIG3, ECHO3);
+
+  bool dryFull = (dryDist > 0 && dryDist < FULL_LEVEL_CM);
+  bool wetFull = (wetDist > 0 && wetDist < FULL_LEVEL_CM);
+
+  if (dryFull && wetFull) {
+    if (!bothFullAlerted) {
+      beep(3);
+      bothFullAlerted = true;
+      dryFullAlerted = true;
+      wetFullAlerted = true;
+    }
+    showMessage("BOTH COMPARTMENTS FULL", "SERVICE REQUIRED");
+    return;
+  } else {
+    bothFullAlerted = false;
+  }
+
+  if (dryFull) {
+    if (!dryFullAlerted) {
+      beep(1);
+      dryFullAlerted = true;
+    }
+    showMessage("DRY COMPARTMENT FULL", "EMPTY BIN REQUIRED");
+    return;
+  } else {
+    dryFullAlerted = false;
+  }
+
+  if (wetFull) {
+    if (!wetFullAlerted) {
+      beep(2);
+      wetFullAlerted = true;
+    }
+    showMessage("WET COMPARTMENT FULL", "EMPTY BIN REQUIRED");
+    return;
+  } else {
+    wetFullAlerted = false;
+  }
+}
+
+// ---------------- Buzzer ----------------
+void beep(int times) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(500);
+    digitalWrite(BUZZER_PIN, LOW);
+    delay(200);
+  }
+}
