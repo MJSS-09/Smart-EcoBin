@@ -115,7 +115,8 @@ Built and validated entirely in **Cirkit Designer** — every component was plac
 
 ---
 
-## Author
+## 👨‍💻 Author
 
-**M. Jayantha Siva Srinivas**
-B.Tech, Electronics and Communication Engineering
+**Mallampally Jayantha Siva Srinivas** | **B.Tech | Electronics and Communication Engineering (ECE)**
+ESSCI-Certified Embedded Fullstack & IoT Analyst , SRM University(AP)
+---
